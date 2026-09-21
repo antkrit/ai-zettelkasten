@@ -1,0 +1,42 @@
+[project]
+name = "zettelkasten"
+version = "0.1.0"
+description = "AI-assisted Zettelkasten: extract atomic notes from text"
+readme = "README.md"
+authors = [
+    { name = "Anton Krytskyi", email = "mujanjagusav@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "deepseek>=1.0.0",
+    "pydantic>=2.13.5",
+    "pydantic-settings>=2.15.0",
+]
+
+[project.scripts]
+zettelkasten = "zettelkasten.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.9,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.6",
+    "ty>=0.0.78",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ty.src]
+include = ["src", "tests"]
