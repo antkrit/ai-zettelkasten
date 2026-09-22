@@ -29,8 +29,6 @@ The project is expected to evolve toward an asynchronous architecture:
 
 ingestion → queue → worker → AI processing → external integrations
 
-However, do not introduce AWS, SQS, Lambda, Notion, or other infrastructure until the current implementation actually requires it.
-
 ## Development workflow
 
 For non-trivial features:
