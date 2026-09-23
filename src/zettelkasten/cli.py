@@ -5,11 +5,14 @@ import json
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from zettelkasten.adapters.ai.deepseek import DeepSeekProvider
 from zettelkasten.adapters.ai.fake import FakeAIProvider
 from zettelkasten.adapters.ai.protocol import AIProvider
 from zettelkasten.adapters.notion.notion import NotionNoteStore
-from zettelkasten.app.extract import extract_atomic_notes
+from zettelkasten.adapters.pdf import extract_pdf_chunks
+from zettelkasten.app.extract import iter_atomic_notes
 from zettelkasten.app.persist import persist_notes
 from zettelkasten.config import Settings, load_settings
 from zettelkasten.models import AtomicNote, SourceText
@@ -38,33 +41,84 @@ def main(argv: list[str] | None = None) -> None:
         "--format",
         choices=("markdown", "json"),
         default="markdown",
-        help="Output format (default: markdown).",
+        help="Output format (default: markdown). json streams one object per line.",
     )
     args = parser.parse_args(argv)
 
-    content = _read_input(args.path)
-    source = SourceText(content=content)
     settings = load_settings()
     ai = _build_provider(fake=args.fake, settings=settings)
-    notes = extract_atomic_notes(source, ai)
+    store = _build_notion_store(settings) if args.notion else None
 
-    if args.format == "json":
-        print(
-            json.dumps(
-                [note.model_dump() for note in notes], indent=2, ensure_ascii=False
-            )
-        )
-    else:
-        print(_format_markdown(notes))
+    try:
+        sources = _load_sources(args.path)
+        _run(sources, ai, store=store, fmt=args.format)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        raise SystemExit(f"Extraction failed: {exc}") from exc
 
-    if args.notion:
-        page_ids = persist_notes(notes, _build_notion_store(settings))
+
+def _load_sources(path: str | None) -> list[SourceText]:
+    if path is not None and Path(path).suffix.lower() == ".pdf":
+        file_path = Path(path)
+        try:
+            chunks = extract_pdf_chunks(file_path)
+        except Exception as exc:
+            raise SystemExit(f"Failed to read PDF {file_path}: {exc}") from exc
+        if not chunks:
+            raise SystemExit(f"Failed to read PDF {file_path}: no extractable text")
+        try:
+            return [SourceText(content=chunk) for chunk in chunks]
+        except ValidationError as exc:
+            raise SystemExit(f"Invalid PDF content from {file_path}: {exc}") from exc
+
+    content = _read_text_input(path)
+    try:
+        return [SourceText(content=content)]
+    except ValidationError as exc:
+        raise SystemExit(f"Invalid source text: {exc}") from exc
+
+
+def _run(
+    sources: list[SourceText],
+    ai: AIProvider,
+    *,
+    store: NotionNoteStore | None,
+    fmt: str,
+) -> None:
+    note_count = 0
+    page_ids: list[str] = []
+    markdown_sep = False
+
+    for note in iter_atomic_notes(sources, ai):
+        note_count += 1
+        _emit_note(note, fmt=fmt, markdown_sep=markdown_sep)
+        markdown_sep = True
+
+        if store is not None:
+            created = persist_notes([note], store)
+            page_ids.extend(created)
+            for page_id in created:
+                print(page_id, file=sys.stderr)
+
+    if note_count == 0 and fmt == "markdown":
+        print("_No atomic notes extracted._")
+
+    if store is not None:
         print(f"Created {len(page_ids)} Notion page(s).", file=sys.stderr)
-        for page_id in page_ids:
-            print(page_id, file=sys.stderr)
 
 
-def _read_input(path: str | None) -> str:
+def _emit_note(note: AtomicNote, *, fmt: str, markdown_sep: bool) -> None:
+    if fmt == "json":
+        print(json.dumps(note.model_dump(), ensure_ascii=False), flush=True)
+        return
+
+    if markdown_sep:
+        print("\n---\n", flush=True)
+    print(_format_one_note(note), flush=True)
+
+
+def _read_text_input(path: str | None) -> str:
     if path is None:
         return sys.stdin.read()
     return Path(path).read_text(encoding="utf-8")
@@ -93,15 +147,9 @@ def _build_notion_store(settings: Settings) -> NotionNoteStore:
         ) from exc
 
 
-def _format_markdown(notes: list[AtomicNote]) -> str:
-    if not notes:
-        return "_No atomic notes extracted._"
-
-    blocks: list[str] = []
-    for note in notes:
-        tags = ", ".join(f"`{tag}`" for tag in note.tags) if note.tags else "_none_"
-        blocks.append(f"# {note.title}\n\n{note.content}\n\nTags: {tags}")
-    return "\n\n---\n\n".join(blocks)
+def _format_one_note(note: AtomicNote) -> str:
+    tags = ", ".join(f"`{tag}`" for tag in note.tags) if note.tags else "_none_"
+    return f"# {note.title}\n\n{note.content}\n\nTags: {tags}"
 
 
 if __name__ == "__main__":

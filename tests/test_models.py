@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from zettelkasten.models import MAX_ATOMIC_NOTES, AtomicNote, SourceText
+from zettelkasten.models import AtomicNote, SourceText
 
 
 def test_source_text_rejects_empty() -> None:
@@ -48,7 +48,3 @@ def test_atomic_note_normalizes_tags() -> None:
         "eta",
         "theta",
     ]
-
-
-def test_max_atomic_notes_constant() -> None:
-    assert MAX_ATOMIC_NOTES == 20

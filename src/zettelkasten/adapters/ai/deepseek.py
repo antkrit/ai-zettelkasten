@@ -30,6 +30,8 @@ Rules:
 - Use markdown only inside the "content" field when useful.
 - Use 1–8 concise, lowercase tags per note that describe the concepts in that note.
 - Do not include generic tags such as "note", "study", or "information".
+- Tags must be lowercase kebab-case.
+- Use the same canonical tag for the same concept.
 - If the source has no extractable idea, return {{"notes": []}}.
 """
 
@@ -59,6 +61,7 @@ class DeepSeekProvider:
             model=self._model,
             stream=False,
             temperature=0.3,
+            max_tokens=8192,
             response_format={"type": "json_object"},
         )
         if not isinstance(result, str):

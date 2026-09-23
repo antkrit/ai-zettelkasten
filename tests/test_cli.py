@@ -17,5 +17,6 @@ def test_cli_fake_json(tmp_path: Path, capsys) -> None:
     path.write_text("Active recall beats rereading.", encoding="utf-8")
     main(["--fake", "--format", "json", str(path)])
     out = capsys.readouterr().out
+    assert out.lstrip().startswith("{")
     assert '"title"' in out
     assert '"content"' in out

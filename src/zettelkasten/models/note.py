@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, field_validator
 
-MAX_ATOMIC_NOTES = 20
+MAX_ATOMIC_NOTES = 12
 MAX_TAGS_PER_NOTE = 8
 
 
