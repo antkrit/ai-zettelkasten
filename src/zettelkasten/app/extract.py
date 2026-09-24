@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -12,7 +13,14 @@ logger = logging.getLogger(__name__)
 
 def extract_atomic_notes(source: SourceText, ai: AIProvider) -> list[AtomicNote]:
     """Validate source, call the AI provider, and normalize the result list."""
+    started = time.perf_counter()
     notes = list(ai.generate_atomic_notes(source)[:MAX_ATOMIC_NOTES])
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    logger.debug(
+        "AI extract: %d chars, %.0f ms",
+        len(source.content),
+        elapsed_ms,
+    )
     logger.info("Extracted %d note(s) from source", len(notes))
     return notes
 

@@ -9,6 +9,15 @@ PAGES_PER_CHUNK = 6
 logger = logging.getLogger(__name__)
 
 
+def _page_range_label(pages: list[int]) -> str:
+    """Format 0-based page indices as a 1-based inclusive range label."""
+    first = pages[0] + 1
+    last = pages[-1] + 1
+    if first == last:
+        return str(first)
+    return f"{first}-{last}"
+
+
 def extract_pdf_chunks(
     path: Path,
     *,
@@ -30,8 +39,12 @@ def extract_pdf_chunks(
                     f"Expected str from pymupdf4llm.to_markdown, got {type(markdown)!r}"
                 )
             stripped = markdown.strip()
+            label = _page_range_label(pages)
             if stripped:
                 chunks.append(stripped)
+                logger.debug("Processed pages %s of %s", label, path.name)
+            else:
+                logger.debug("Skipped empty pages %s of %s", label, path.name)
         logger.info(
             "Extracted %d chunk(s) from %s (%d pages)",
             len(chunks),

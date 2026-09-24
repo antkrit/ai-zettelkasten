@@ -20,35 +20,24 @@ from zettelkasten.models import AtomicNote, SourceText
 
 logger = logging.getLogger("zettelkasten")
 
-
-class _StderrHandler(logging.Handler):
-    """Write to the current ``sys.stderr`` (safe across pytest capture resets)."""
-
-    terminator = "\n"
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            msg = self.format(record)
-            stream = sys.stderr
-            stream.write(msg + self.terminator)
-            stream.flush()
-        except Exception:
-            self.handleError(record)
+_VERBOSITY_LEVELS = {
+    "warning": logging.WARNING,
+    "info": logging.INFO,
+    "debug": logging.DEBUG,
+}
 
 
-def _configure_logging() -> None:
+def _configure_logging(level: int) -> None:
     package_logger = logging.getLogger("zettelkasten")
-    if package_logger.handlers:
-        return
-    handler = _StderrHandler()
+    package_logger.handlers.clear()
+    handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(message)s"))
     package_logger.addHandler(handler)
-    package_logger.setLevel(logging.INFO)
+    package_logger.setLevel(level)
     package_logger.propagate = False
 
 
 def main(argv: list[str] | None = None) -> None:
-    _configure_logging()
     parser = argparse.ArgumentParser(
         description="Extract atomic Zettelkasten notes from text.",
     )
@@ -73,7 +62,14 @@ def main(argv: list[str] | None = None) -> None:
         default="markdown",
         help="Output format (default: markdown). json streams one object per line.",
     )
+    parser.add_argument(
+        "--verbosity",
+        choices=tuple(_VERBOSITY_LEVELS),
+        default="info",
+        help="Logging verbosity (default: info). Max: debug.",
+    )
     args = parser.parse_args(argv)
+    _configure_logging(_VERBOSITY_LEVELS[args.verbosity])
 
     settings = load_settings()
     ai = _build_provider(fake=args.fake, settings=settings)
