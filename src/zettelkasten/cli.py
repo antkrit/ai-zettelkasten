@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -17,8 +18,37 @@ from zettelkasten.app.persist import persist_notes
 from zettelkasten.config import Settings, load_settings
 from zettelkasten.models import AtomicNote, SourceText
 
+logger = logging.getLogger("zettelkasten")
+
+
+class _StderrHandler(logging.Handler):
+    """Write to the current ``sys.stderr`` (safe across pytest capture resets)."""
+
+    terminator = "\n"
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            stream = sys.stderr
+            stream.write(msg + self.terminator)
+            stream.flush()
+        except Exception:
+            self.handleError(record)
+
+
+def _configure_logging() -> None:
+    package_logger = logging.getLogger("zettelkasten")
+    if package_logger.handlers:
+        return
+    handler = _StderrHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    package_logger.addHandler(handler)
+    package_logger.setLevel(logging.INFO)
+    package_logger.propagate = False
+
 
 def main(argv: list[str] | None = None) -> None:
+    _configure_logging()
     parser = argparse.ArgumentParser(
         description="Extract atomic Zettelkasten notes from text.",
     )
@@ -98,14 +128,12 @@ def _run(
         if store is not None:
             created = persist_notes([note], store)
             page_ids.extend(created)
-            for page_id in created:
-                print(page_id, file=sys.stderr)
 
     if note_count == 0 and fmt == "markdown":
         print("_No atomic notes extracted._")
 
     if store is not None:
-        print(f"Created {len(page_ids)} Notion page(s).", file=sys.stderr)
+        logger.info("Created %d Notion page(s).", len(page_ids))
 
 
 def _emit_note(note: AtomicNote, *, fmt: str, markdown_sep: bool) -> None:

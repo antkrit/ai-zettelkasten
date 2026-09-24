@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -6,11 +7,14 @@ from zettelkasten.models import MAX_ATOMIC_NOTES, AtomicNote, SourceText
 
 DEFAULT_MAX_WORKERS = 3
 
+logger = logging.getLogger(__name__)
+
 
 def extract_atomic_notes(source: SourceText, ai: AIProvider) -> list[AtomicNote]:
     """Validate source, call the AI provider, and normalize the result list."""
-    notes = ai.generate_atomic_notes(source)
-    return list(notes[:MAX_ATOMIC_NOTES])
+    notes = list(ai.generate_atomic_notes(source)[:MAX_ATOMIC_NOTES])
+    logger.info("Extracted %d note(s) from source", len(notes))
+    return notes
 
 
 def iter_atomic_notes(
@@ -32,6 +36,7 @@ def iter_atomic_notes(
         return
 
     workers = max(1, min(max_workers, len(sources)))
+    logger.info("Processing %d sources with %d workers", len(sources), workers)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [pool.submit(extract_atomic_notes, source, ai) for source in sources]
         for future in as_completed(futures):

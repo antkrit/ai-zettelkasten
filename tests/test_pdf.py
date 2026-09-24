@@ -103,8 +103,7 @@ def test_iter_chunked_yields_as_chunks_complete() -> None:
         SourceText(content="fast"),
     ]
     titles = [
-        note.title
-        for note in iter_atomic_notes(sources, TimedAI(), max_workers=2)
+        note.title for note in iter_atomic_notes(sources, TimedAI(), max_workers=2)
     ]
     assert titles == ["fast", "slow"]
 

@@ -1,9 +1,12 @@
+import logging
 from pathlib import Path
 
 import pymupdf
 import pymupdf4llm
 
 PAGES_PER_CHUNK = 6
+
+logger = logging.getLogger(__name__)
 
 
 def extract_pdf_chunks(
@@ -29,6 +32,12 @@ def extract_pdf_chunks(
             stripped = markdown.strip()
             if stripped:
                 chunks.append(stripped)
+        logger.info(
+            "Extracted %d chunk(s) from %s (%d pages)",
+            len(chunks),
+            path.name,
+            page_count,
+        )
         return chunks
     finally:
         doc.close()
