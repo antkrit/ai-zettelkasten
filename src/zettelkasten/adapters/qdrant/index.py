@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from uuid import NAMESPACE_URL, uuid5
+from uuid import UUID, uuid5
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -11,6 +11,9 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams
 
 from zettelkasten.models import AtomicNote
+
+# Fixed namespace for note ids; never change it, or existing points get new ids.
+NOTE_ID_NAMESPACE = UUID("a68ad001-4340-4960-97de-ecd91d8f1bfa")
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ def note_to_document(note: AtomicNote) -> Document:
     """
     text = f"{note.title}\n\n{note.content}"
     return Document(
-        id=str(uuid5(NAMESPACE_URL, text)),
+        id=str(uuid5(NOTE_ID_NAMESPACE, text)),
         page_content=text,
         metadata=note.model_dump(),
     )
