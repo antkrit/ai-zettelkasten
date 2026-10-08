@@ -21,3 +21,6 @@ build/
 .ruff_cache/
 .mypy_cache/
 .ty_cache/
+
+# Local Qdrant experiment store
+.qdrant/

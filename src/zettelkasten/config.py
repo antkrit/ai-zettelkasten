@@ -33,6 +33,34 @@ class NotionSettings(BaseSettings):
     tags_property: str = "Tags"
 
 
+class OpenAISettings(BaseSettings):
+    """OpenAI API settings for embeddings (`OPENAI_*` env vars)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="OPENAI_",
+        extra="ignore",
+    )
+
+    api_key: str = ""
+    embedding_model: str = "text-embedding-3-small"
+
+
+class QdrantSettings(BaseSettings):
+    """Local Qdrant settings for the embedding experiment (`QDRANT_*` env vars)."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="QDRANT_",
+        extra="ignore",
+    )
+
+    path: str = ".qdrant"
+    collection: str = "atomic_notes"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -42,6 +70,8 @@ class Settings(BaseSettings):
 
     deepseek: DeepSeekSettings = Field(default_factory=DeepSeekSettings)
     notion: NotionSettings = Field(default_factory=NotionSettings)
+    openai: OpenAISettings = Field(default_factory=OpenAISettings)
+    qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
 
 
 def load_settings() -> Settings:

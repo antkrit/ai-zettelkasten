@@ -4,15 +4,21 @@ import argparse
 import json
 import logging
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
+from langchain_core.embeddings import Embeddings
+from langchain_openai import OpenAIEmbeddings
 from pydantic import ValidationError
+from qdrant_client import QdrantClient
 
 from zettelkasten.adapters.ai.deepseek import DeepSeekProvider
 from zettelkasten.adapters.ai.fake import FakeAIProvider
 from zettelkasten.adapters.ai.protocol import AIProvider
 from zettelkasten.adapters.notion.notion import NotionNoteStore
 from zettelkasten.adapters.pdf import extract_pdf_chunks
+from zettelkasten.adapters.qdrant import QdrantNoteIndex, SearchHit
 from zettelkasten.app.extract import iter_atomic_notes
 from zettelkasten.app.persist import persist_notes
 from zettelkasten.config import Settings, load_settings
@@ -38,8 +44,39 @@ def _configure_logging(level: int) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    if args_list and args_list[0] == "search":
+        _main_search(args_list[1:])
+        return
+    _main_extract(args_list)
+
+
+def _common_options() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--format",
+        choices=("markdown", "json"),
+        default="markdown",
+        help="Output format (default: markdown). json streams one object per line.",
+    )
+    parser.add_argument(
+        "--verbosity",
+        choices=tuple(_VERBOSITY_LEVELS),
+        default="info",
+        help="Logging verbosity (default: info). Max: debug.",
+    )
+    return parser
+
+
+def _main_extract(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(
         description="Extract atomic Zettelkasten notes from text.",
+        epilog=(
+            "Subcommand: 'zettelkasten search QUERY' runs semantic search over "
+            "notes indexed with --qdrant (see 'zettelkasten search --help'). "
+            "To extract from a file literally named 'search', pass './search'."
+        ),
+        parents=[_common_options()],
     )
     parser.add_argument(
         "path",
@@ -57,16 +94,9 @@ def main(argv: list[str] | None = None) -> None:
         help="Persist extracted notes to the configured Notion database.",
     )
     parser.add_argument(
-        "--format",
-        choices=("markdown", "json"),
-        default="markdown",
-        help="Output format (default: markdown). json streams one object per line.",
-    )
-    parser.add_argument(
-        "--verbosity",
-        choices=tuple(_VERBOSITY_LEVELS),
-        default="info",
-        help="Logging verbosity (default: info). Max: debug.",
+        "--qdrant",
+        action="store_true",
+        help="Embed notes and store them in local Qdrant (experimental).",
     )
     args = parser.parse_args(argv)
     _configure_logging(_VERBOSITY_LEVELS[args.verbosity])
@@ -74,14 +104,47 @@ def main(argv: list[str] | None = None) -> None:
     settings = load_settings()
     ai = _build_provider(fake=args.fake, settings=settings)
     store = _build_notion_store(settings) if args.notion else None
+    embeddings = _build_embeddings(settings) if args.qdrant else None
 
     try:
         sources = _load_sources(args.path)
-        _run(sources, ai, store=store, fmt=args.format)
+        indexer = _open_qdrant_index(settings, embeddings) if embeddings is not None else nullcontext()
+        with indexer as index:
+            _run(sources, ai, store=store, index=index, fmt=args.format)
     except SystemExit:
         raise
     except Exception as exc:
         raise SystemExit(f"Extraction failed: {exc}") from exc
+
+
+def _main_search(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(
+        prog="zettelkasten search",
+        description="Semantic search over notes indexed in local Qdrant.",
+        parents=[_common_options()],
+    )
+    parser.add_argument("query", help="Natural-language search query.")
+    parser.add_argument(
+        "-k",
+        type=int,
+        default=5,
+        help="Number of results to return (default: 5).",
+    )
+    args = parser.parse_args(argv)
+    _configure_logging(_VERBOSITY_LEVELS[args.verbosity])
+
+    if args.k < 1:
+        raise SystemExit("-k must be at least 1.")
+
+    settings = load_settings()
+    embeddings = _build_embeddings(settings)
+    try:
+        with _open_qdrant_index(settings, embeddings) as index:
+            hits = index.search(args.query, k=args.k)
+    except Exception as exc:
+        raise SystemExit(f"Search failed: {exc}") from exc
+
+    _emit_search_hits(hits, fmt=args.format)
 
 
 def _load_sources(path: str | None) -> list[SourceText]:
@@ -110,6 +173,7 @@ def _run(
     ai: AIProvider,
     *,
     store: NotionNoteStore | None,
+    index: QdrantNoteIndex | None,
     fmt: str,
 ) -> None:
     note_count = 0
@@ -125,11 +189,16 @@ def _run(
             created = persist_notes([note], store)
             page_ids.extend(created)
 
+        if index is not None:
+            index.add_note(note)
+
     if note_count == 0 and fmt == "markdown":
         print("_No atomic notes extracted._")
 
     if store is not None:
         logger.info("Created %d Notion page(s).", len(page_ids))
+    if index is not None:
+        logger.info("Indexed %d note(s) in Qdrant.", note_count)
 
 
 def _emit_note(note: AtomicNote, *, fmt: str, markdown_sep: bool) -> None:
@@ -140,6 +209,26 @@ def _emit_note(note: AtomicNote, *, fmt: str, markdown_sep: bool) -> None:
     if markdown_sep:
         print("\n---\n", flush=True)
     print(_format_one_note(note), flush=True)
+
+
+def _emit_search_hits(hits: list[SearchHit], *, fmt: str) -> None:
+    if fmt == "json":
+        for hit in hits:
+            payload = hit.note.model_dump() | {"score": hit.score}
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
+        return
+
+    if not hits:
+        print("_No matching notes._")
+        return
+
+    for index, hit in enumerate(hits):
+        if index:
+            print("\n---\n", flush=True)
+        print(
+            f"{_format_one_note(hit.note)}\n\nScore: {hit.score:.4f}",
+            flush=True,
+        )
 
 
 def _read_text_input(path: str | None) -> str:
@@ -169,6 +258,26 @@ def _build_notion_store(settings: Settings) -> NotionNoteStore:
         raise SystemExit(
             "Notion requires NOTION_API_KEY and NOTION_DATABASE_ID in the environment."
         ) from exc
+
+
+def _build_embeddings(settings: Settings) -> Embeddings:
+    if not settings.openai.api_key:
+        raise SystemExit("Qdrant embeddings require OPENAI_API_KEY in the environment.")
+    return OpenAIEmbeddings(
+        api_key=settings.openai.api_key,
+        model=settings.openai.embedding_model,
+    )
+
+
+@contextmanager
+def _open_qdrant_index(
+    settings: Settings, embeddings: Embeddings
+) -> Iterator[QdrantNoteIndex]:
+    client = QdrantClient(path=settings.qdrant.path)
+    try:
+        yield QdrantNoteIndex(client, settings.qdrant.collection, embeddings)
+    finally:
+        client.close()
 
 
 def _format_one_note(note: AtomicNote) -> str:
